@@ -1,2 +1,15 @@
-images
-masks
+# PyCharm 설정 파일 제외
+.idea/
+
+# 가상환경 제외
+.venv/
+venv/
+
+# 파이썬 캐시 제외
+__pycache__/
+*.py[cod]
+
+# 데이터셋 및 모델 결과물 (예시)
+data/
+results/
+*.pth
