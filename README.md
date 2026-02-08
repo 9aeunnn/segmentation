@@ -1,5 +1,6 @@
 # U-Net Segmentation Experiments
 
+
 이 프로젝트는 **U-Net 기반 이미지 segmentation**을 직접 구현하고,  
 구조 요소(activation function, skip connection, epoch 수 등)가  
 학습 성능에 어떤 영향을 주는지 실험·분석하기 위한 코드입니다.
@@ -42,7 +43,15 @@ segmentation/
 ├─ requirements.txt
 └─ README.md
 ```
+---
 
+## 📶 Dataset
+> https://www.kaggle.com/datasets/tapakah68/supervisely-filtered-segmentation-person-dataset
+- 이미지 수: 약 2667장
+- 데이터형태:
+    - `images/` 폴더 : 실제 RGB 이미지
+    - `masks/` 폴더 : 각 이미지에 대응하는 이진 마스크 (사람 vs 배경)
+- 목표: 사람 픽셀을 구별
 ---
 
 ## 🧠 Model Variants
