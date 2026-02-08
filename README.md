@@ -4,6 +4,7 @@
 이 프로젝트는 **U-Net 기반 이미지 segmentation**을 직접 구현하고,  
 구조 요소(activation function, skip connection, epoch 수 등)가  
 학습 성능에 어떤 영향을 주는지 실험·분석하기 위한 코드입니다.
+
 ---
 
 ## 📌 Project Goals
