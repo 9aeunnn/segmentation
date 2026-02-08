@@ -4,26 +4,6 @@ import torch.nn.functional as F
 
 
 # -------------------------
-# 1) 기본 블록: Conv -> (BN) -> ReLU 를 2번
-# -------------------------
-# def double_conv(in_ch: int, out_ch: int, use_bn: bool = True) -> nn.Sequential:
-#     layers = [
-#         nn.Conv2d(in_ch, out_ch, kernel_size=3, padding=1, bias=not use_bn),
-#     ]
-#     if use_bn:
-#         layers.append(nn.BatchNorm2d(out_ch))
-#     layers.append(nn.ReLU(inplace=True))
-#
-#     layers += [
-#         nn.Conv2d(out_ch, out_ch, kernel_size=3, padding=1, bias=not use_bn),
-#     ]
-#     if use_bn:
-#         layers.append(nn.BatchNorm2d(out_ch))
-#     layers.append(nn.ReLU(inplace=True))
-#
-#     return nn.Sequential(*layers)
-
-# -------------------------
 # 1-2) Leaky ReLU
 # -------------------------
 def double_conv(in_ch: int, out_ch: int, use_bn: bool = True) -> nn.Sequential:
@@ -60,84 +40,83 @@ class Down(nn.Module):
 
 
 # -------------------------
-# 3) Up: Upsample -> concat(skip) -> DoubleConv
-#   - align_corners False로 통일
+# 3) Up (NO SKIP):
+#    Upsample -> DoubleConv
 # -------------------------
-class Up(nn.Module):
+class UpNoSkip(nn.Module):
     def __init__(self, in_ch: int, out_ch: int, use_bn: bool = True):
         super().__init__()
-        # bilinear upsample (간단)
         self.up = nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False)
         self.conv = double_conv(in_ch, out_ch, use_bn)
 
-    def forward(self, x, skip):
+    def forward(self, x):
         x = self.up(x)
-
-        # 크기 안 맞는 경우 padding으로 맞추기 (U-Net에서 자주 필요)
-        diffY = skip.size(2) - x.size(2)
-        diffX = skip.size(3) - x.size(3)
-        x = F.pad(x, [diffX // 2, diffX - diffX // 2, diffY // 2, diffY - diffY // 2])
-
-        #skip connection
-        x = torch.cat([skip, x], dim=1)
         x = self.conv(x)
         return x
 
 
 # -------------------------
-# 4) UNet (logits 반환!)
+# 4) UNet WITHOUT skip connection
 # -------------------------
 class UNet(nn.Module):
     """
-    - 입력: (B, in_channels, H, W)
-    - 출력: (B, out_channels, H, W)  # logits (sigmoid 전)
+    No-Skip UNet (Encoder-Decoder CNN)
+
+    입력 : (B, in_channels, H, W)
+    출력 : (B, out_channels, H, W)  # logits
     """
-    def __init__(self, in_channels: int = 3, out_channels: int = 1, base_channels: int = 64, use_bn: bool = True):
+    def __init__(
+        self,
+        in_channels: int = 3,
+        out_channels: int = 1,
+        base_channels: int = 64,
+        use_bn: bool = True,
+    ):
         super().__init__()
         c = base_channels
 
         # Encoder
-        self.inc = double_conv(in_channels, c, use_bn)
+        self.inc   = double_conv(in_channels, c, use_bn)
         self.down1 = Down(c, c * 2, use_bn)
         self.down2 = Down(c * 2, c * 4, use_bn)
         self.down3 = Down(c * 4, c * 8, use_bn)
         self.down4 = Down(c * 8, c * 16, use_bn)
 
-        # Decoder
-        self.up1 = Up(c * 16 + c * 8, c * 8, use_bn)
-        self.up2 = Up(c * 8 + c * 4, c * 4, use_bn)
-        self.up3 = Up(c * 4 + c * 2, c * 2, use_bn)
-        self.up4 = Up(c * 2 + c, c, use_bn)
+        # Decoder (NO SKIP → 채널 수 주의!)
+        self.up1 = UpNoSkip(c * 16, c * 8, use_bn)
+        self.up2 = UpNoSkip(c * 8,  c * 4, use_bn)
+        self.up3 = UpNoSkip(c * 4,  c * 2, use_bn)
+        self.up4 = UpNoSkip(c * 2,  c,     use_bn)
 
-        # output conv (1x1)
+        # Output
         self.outc = nn.Conv2d(c, out_channels, kernel_size=1)
 
     def forward(self, x):
-        # encoder
+        # Encoder
         x1 = self.inc(x)      # c
         x2 = self.down1(x1)   # 2c
         x3 = self.down2(x2)   # 4c
         x4 = self.down3(x3)   # 8c
         x5 = self.down4(x4)   # 16c
 
-        # decoder (skip concat)
-        x = self.up1(x5, x4)  # 8c
-        x = self.up2(x, x3)   # 4c
-        x = self.up3(x, x2)   # 2c
-        x = self.up4(x, x1)   # c
+        # Decoder (NO SKIP)
+        x = self.up1(x5)
+        x = self.up2(x)
+        x = self.up3(x)
+        x = self.up4(x)
 
-        logits = self.outc(x) # out_channels
+        logits = self.outc(x)
         return logits
 
 
 # -------------------------
 # 5) Dice Loss (logits 입력)
 # -------------------------
-def dice_loss_from_logits(logits: torch.Tensor, target: torch.Tensor, eps: float = 1e-7) -> torch.Tensor:
-    """
-    logits: (B,1,H,W)  (sigmoid 전)
-    target: (B,1,H,W)  0/1
-    """
+def dice_loss_from_logits(
+    logits: torch.Tensor,
+    target: torch.Tensor,
+    eps: float = 1e-7
+) -> torch.Tensor:
     probs = torch.sigmoid(logits)
     probs = probs.contiguous()
     target = target.contiguous()
@@ -149,14 +128,10 @@ def dice_loss_from_logits(logits: torch.Tensor, target: torch.Tensor, eps: float
 
 
 # -------------------------
-# 6) 시각화 보조 (main.py에서 그대로 쓰게 유지)
+# 6) 시각화 보조
 # -------------------------
 @torch.no_grad()
 def tensor_to_image_np(img_t: torch.Tensor) -> torch.Tensor:
-    """
-    img_t: (C,H,W), 0~1
-    return: (H,W,3) tensor
-    """
     x = img_t.detach().cpu().clamp(0, 1)
     x = x.permute(1, 2, 0).contiguous()
     return x
@@ -164,10 +139,6 @@ def tensor_to_image_np(img_t: torch.Tensor) -> torch.Tensor:
 
 @torch.no_grad()
 def tensor_to_mask_np(mask_t: torch.Tensor) -> torch.Tensor:
-    """
-    mask_t: (1,H,W) or (H,W)
-    return : (H,W) tensor, 0~1
-    """
     x = mask_t.detach().cpu()
     if x.ndim == 3:
         x = x[0]
